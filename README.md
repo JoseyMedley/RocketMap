@@ -1,7 +1,7 @@
-
+Yes, this is real. This is a working fork of RocketMap in 2024 on Python 3.10, albeit with a much different method of scanning. Expect lots of bugs. This version gets the pokemon data from RealAndroidBot and PGSharp paid(which is free for rooted devices using the code " GIFT-EXPERIMENT-ROOTONLY"), which I modified to post the data to my rocketmap server. You can get my fork of RAB here https://github.com/JoseyMedley/RealAndroidBot/tree/master.
 # RocketMap
 
-![Python 2.7](https://img.shields.io/badge/python-2.7-blue.svg) ![License](https://img.shields.io/github/license/RocketMap/RocketMap.svg) [![Build Status](https://travis-ci.org/RocketMap/RocketMap.svg?branch=develop)](https://travis-ci.org/RocketMap/RocketMap)
+![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg) ![License](https://img.shields.io/github/license/RocketMap/RocketMap.svg) [![Build Status](https://travis-ci.org/RocketMap/RocketMap.svg?branch=develop)](https://travis-ci.org/RocketMap/RocketMap)
 
 Live visualization of all the Pokémon (with option to show gyms, raids and PokéStops) in your area. This is a proof of concept that we can load all the Pokémon visible nearby given a location. Currently runs on a Flask server displaying Google Maps with markers on it.
 
