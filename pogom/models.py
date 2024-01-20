@@ -8,15 +8,14 @@ import sys
 import gc
 import time
 import math
-
-from peewee import (InsertQuery, Check, CompositeKey, ForeignKeyField,
+import peewee
+from peewee import (Insert, Check, CompositeKey, ForeignKeyField,
                     SmallIntegerField, IntegerField, CharField, DoubleField,
-                    BooleanField, DateTimeField, fn, DeleteQuery, FloatField,
+                    BooleanField, DateTimeField, fn, Delete, FloatField,
                     TextField, BigIntegerField, PrimaryKeyField,
-                    JOIN, OperationalError)
+                    JOIN, OperationalError, _WriteQuery, Case as case)
 from playhouse.flask_utils import FlaskDB
 from playhouse.pool import PooledMySQLDatabase
-from playhouse.shortcuts import RetryOperationalError, case
 from playhouse.migrate import migrate, MySQLMigrator
 from datetime import datetime, timedelta
 from cachetools import TTLCache
@@ -30,10 +29,6 @@ from .utils import (get_pokemon_name, get_pokemon_types,
 from .transform import transform_from_wgs_to_gcj, get_new_coords
 from .customLog import printPokemon
 
-from .account import check_login, setup_api, pokestop_spinnable, spin_pokestop
-from .proxy import get_new_proxy
-from .apiRequests import encounter
-
 log = logging.getLogger(__name__)
 
 args = get_args()
@@ -42,7 +37,22 @@ cache = TTLCache(maxsize=100, ttl=60 * 5)
 
 db_schema_version = 30
 
+class RetryOperationalError(object):
 
+    def execute_sql(self, sql, params=None, commit=True):
+        try:
+            cursor = super(RetryOperationalError, self).execute_sql(
+                sql, params, commit)
+        except OperationalError:
+            if not self.is_closed():
+                self.close()
+            with peewee.__exception_wrapper__:
+                cursor = self.cursor()
+                cursor.execute(sql, params or ())
+                if commit and not self.in_transaction():
+                    self.commit()
+        return cursor
+    
 class MyRetryDB(RetryOperationalError, PooledMySQLDatabase):
     pass
 
@@ -697,9 +707,7 @@ class LocationAltitude(LatLongModel):
 
     @staticmethod
     def save_altitude(loc, altitude):
-        InsertQuery(
-            LocationAltitude,
-            rows=[LocationAltitude.new_loc(loc, altitude)]).upsert().execute()
+        LocationAltitude.insert(rows=[LocationAltitude.new_loc(loc, altitude)]).on_conflict().execute()
 
 
 class PlayerLocale(BaseModel):
@@ -711,7 +719,7 @@ class PlayerLocale(BaseModel):
     @staticmethod
     def get_locale(location):
         locale = None
-        with PlayerLocale.database().execution_context():
+        with PlayerLocale.database().connection_context():
             try:
                 query = PlayerLocale.get(PlayerLocale.location == location)
                 locale = {
@@ -1252,7 +1260,7 @@ class SpawnPoint(LatLongModel):
     def get_spawnpoints(swLat, swLng, neLat, neLng, timestamp=0,
                         oSwLat=None, oSwLng=None, oNeLat=None, oNeLng=None):
         spawnpoints = {}
-        with SpawnPoint.database().execution_context():
+        with SpawnPoint.database().connection_context():
             query = (SpawnPoint.select(
                 SpawnPoint.latitude, SpawnPoint.longitude, SpawnPoint.id,
                 SpawnPoint.links, SpawnPoint.kind, SpawnPoint.latest_seen,
@@ -1754,76 +1762,6 @@ class GymDetails(BaseModel):
     url = Utf8mb4CharField()
     last_scanned = DateTimeField(default=datetime.utcnow)
 
-
-class Token(BaseModel):
-    token = TextField()
-    last_updated = DateTimeField(default=datetime.utcnow, index=True)
-
-    @staticmethod
-    def get_valid(limit=15):
-        # Make sure we don't grab more than we can process
-        if limit > 15:
-            limit = 15
-        valid_time = datetime.utcnow() - timedelta(seconds=30)
-        token_ids = []
-        tokens = []
-        try:
-            with Token.database().execution_context():
-                query = (Token
-                         .select()
-                         .where(Token.last_updated > valid_time)
-                         .order_by(Token.last_updated.asc())
-                         .limit(limit)
-                         .dicts())
-                for t in query:
-                    token_ids.append(t['id'])
-                    tokens.append(t['token'])
-                if tokens:
-                    log.debug('Retrieved Token IDs: %s.', token_ids)
-                    query = DeleteQuery(Token).where(Token.id << token_ids)
-                    rows = query.execute()
-                    log.debug('Claimed and removed %d captcha tokens.', rows)
-        except OperationalError as e:
-            log.exception('Failed captcha token transactional query: %s.', e)
-
-        return tokens
-
-
-class HashKeys(BaseModel):
-    key = Utf8mb4CharField(primary_key=True, max_length=20)
-    maximum = IntegerField(default=0)
-    remaining = IntegerField(default=0)
-    peak = IntegerField(default=0)
-    expires = DateTimeField(null=True)
-    last_updated = DateTimeField(default=datetime.utcnow)
-
-    # Obfuscate hashing keys before sending them to the front-end.
-    @staticmethod
-    def get_obfuscated_keys():
-        hashkeys = HashKeys.get_all()
-        for i, s in enumerate(hashkeys):
-            hashkeys[i]['key'] = s['key'][:-9] + '*'*9
-        return hashkeys
-
-    # Retrieve stored 'peak' value from recently used hashing keys.
-    @staticmethod
-    def get_stored_peaks():
-        hashkeys = {}
-        try:
-            with HashKeys.database().execution_context():
-                query = (HashKeys
-                         .select(HashKeys.key, HashKeys.peak)
-                         .where(HashKeys.last_updated >
-                                (datetime.utcnow() - timedelta(minutes=30)))
-                         .dicts())
-                for dbhk in query:
-                    hashkeys[dbhk['key']] = dbhk['peak']
-        except OperationalError as e:
-            log.exception('Failed to get hashing keys stored peaks: %s.', e)
-
-        return hashkeys
-
-
 def hex_bounds(center, steps=None, radius=None):
     # Make a box that is (70m * step_limit * 2) + 70m away from the
     # center point.  Rationale is that you need to travel.
@@ -1837,8 +1775,7 @@ def hex_bounds(center, steps=None, radius=None):
 
 # todo: this probably shouldn't _really_ be in "models" anymore, but w/e.
 def parse_map(args, map_dict, scan_coords, scan_location, db_update_queue,
-              wh_update_queue, key_scheduler, api, status, now_date, account,
-              account_sets):
+              wh_update_queue, status, now_date):
     pokemon = {}
     pokestops = {}
     gyms = {}
@@ -1860,10 +1797,6 @@ def parse_map(args, map_dict, scan_coords, scan_location, db_update_queue,
     # Consolidate the individual lists in each cell into two lists of Pokemon
     # and a list of forts.
     cells = map_dict['responses']['GET_MAP_OBJECTS'].map_cells
-    # Get the level for the pokestop spin, and to send to webhook.
-    level = account['level']
-    # Use separate level indicator for our L30 encounters.
-    encounter_level = level
 
     for i, cell in enumerate(cells):
         # If we have map responses then use the time from the request
@@ -1893,9 +1826,7 @@ def parse_map(args, map_dict, scan_coords, scan_location, db_update_queue,
     if not wild_pokemon and not nearby_pokemon:
         # ...and there are no gyms/pokestops then it's unusable/bad.
         if not forts:
-            log.warning('Bad scan. Parsing found absolutely nothing'
-                        + ' using account %s.', account['username'])
-            log.info('Common causes: captchas or IP bans.')
+            log.warning('Bad scan. Parsing found absolutely nothing')
         elif not args.no_pokemon:
             # When gym scanning we'll go over the speed limit
             # and Pokémon will be invisible, but we'll still be able
@@ -2603,7 +2534,7 @@ def parse_gyms(args, gym_responses, wh_update_queue, db_update_queue):
     # Get rid of all the gym members, we're going to insert new records.
     if gym_details:
         with GymMember.database().execution_context():
-            DeleteQuery(GymMember).where(
+            Delete(GymMember).where(
                 GymMember.gym_id << gym_details.keys()).execute()
 
     # Insert new gym members.
@@ -2656,12 +2587,6 @@ def clean_db_loop(args):
     full_cleanup_secs = 600
     while True:
         try:
-            db_cleanup_regular()
-
-            # Remove old worker status entries.
-            if args.db_cleanup_worker > 0:
-                db_cleanup_worker_status(args.db_cleanup_worker)
-
             # Check if it's time to run full database cleanup.
             now = default_timer()
             if now - full_cleanup_timer > full_cleanup_secs:
@@ -2687,62 +2612,6 @@ def clean_db_loop(args):
             time.sleep(regular_cleanup_secs)
         except Exception as e:
             log.exception('Database cleanup failed: %s.', e)
-
-
-def db_cleanup_regular():
-    log.debug('Regular database cleanup started.')
-    start_timer = default_timer()
-
-    now = datetime.utcnow()
-    # http://docs.peewee-orm.com/en/latest/peewee/database.html#advanced-connection-management
-    # When using an execution context, a separate connection from the pool
-    # will be used inside the wrapped block and a transaction will be started.
-    with Token.database().execution_context():
-        # Remove unusable captcha tokens.
-        query = (Token
-                 .delete()
-                 .where(Token.last_updated < now - timedelta(seconds=120)))
-        query.execute()
-
-        # Remove active modifier from expired lured pokestops.
-        query = (Pokestop
-                 .update(lure_expiration=None, active_fort_modifier=None)
-                 .where(Pokestop.lure_expiration < now))
-        query.execute()
-
-        # Remove expired or inactive hashing keys.
-        query = (HashKeys
-                 .delete()
-                 .where((HashKeys.expires < now - timedelta(days=1)) |
-                        (HashKeys.last_updated < now - timedelta(days=7))))
-        query.execute()
-
-    time_diff = default_timer() - start_timer
-    log.debug('Completed regular cleanup in %.6f seconds.', time_diff)
-
-
-def db_cleanup_worker_status(age_minutes):
-    log.debug('Beginning cleanup of old worker status.')
-    start_timer = default_timer()
-
-    worker_status_timeout = datetime.utcnow() - timedelta(minutes=age_minutes)
-
-    with MainWorker.database().execution_context():
-        # Remove status information from inactive instances.
-        query = (MainWorker
-                 .delete()
-                 .where(MainWorker.last_modified < worker_status_timeout))
-        query.execute()
-
-        # Remove worker status information that are inactive.
-        query = (WorkerStatus
-                 .delete()
-                 .where(MainWorker.last_modified < worker_status_timeout))
-        query.execute()
-
-    time_diff = default_timer() - start_timer
-    log.debug('Completed cleanup of old worker status in %.6f seconds.',
-              time_diff)
 
 
 def db_clean_pokemons(age_hours):
@@ -2930,17 +2799,35 @@ def db_clean_forts(age_hours):
     time_diff = default_timer() - start_timer
     log.debug('Completed cleanup of old forts in %.6f seconds.',
               time_diff)
-
+    
 
 def bulk_upsert(cls, data, db):
-    rows = data.values()
+    rows = list(data.values())
     num_rows = len(rows)
     i = 0
-
     # This shouldn't happen, ever, but anyways...
     if num_rows < 1:
         return
+    def iter_rows(cls, row_dict):
+        model_meta = cls._meta
 
+        defaults = model_meta._default_dict
+        callables = model_meta._default_callables
+
+        field_row = defaults.copy()
+        seen = set()
+        for key in row_dict:
+            if key in model_meta.fields:
+                field = model_meta.fields[key]
+            else:
+                field = key
+            field_row[field] = row_dict[key]
+            seen.add(field)
+        if callables:
+            for field in callables:
+                if field not in seen:
+                    field_row[field] = callables[field]()
+                yield field_row
     # We used to support SQLite and it has a default max 999 parameters,
     # so we limited how many rows we insert for it.
     # Oracle: 64000
@@ -2950,27 +2837,25 @@ def bulk_upsert(cls, data, db):
     step = 500
 
     # Prepare for our query.
-    conn = db.get_conn()
-    cursor = db.get_cursor()
+    conn = db.connection()
+    cursor = db.cursor()
 
     # We build our own INSERT INTO ... ON DUPLICATE KEY UPDATE x=VALUES(x)
     # query, making sure all data is properly escaped. We use
     # placeholders for VALUES(%s, %s, ...) so we can use executemany().
-    # We use peewee's InsertQuery to retrieve the fields because it
+    # We use peewee's insert to retrieve the fields because it
     # takes care of peewee's internals (e.g. required default fields).
-    query = InsertQuery(cls, rows=[rows[0]])
     # Take the first row. We need to call _iter_rows() for peewee internals.
     # Using next() for a single item is not considered "pythonic".
     first_row = {}
-    for row in query._iter_rows():
+    for row in iter_rows(cls, rows[0]):
         first_row = row
         break
     # Convert the row to its fields, sorted by peewee.
     row_fields = sorted(first_row.keys(), key=lambda x: x._sort_key)
-    row_fields = map(lambda x: x.name, row_fields)
+    row_fields = list(map(lambda x: x.name, row_fields))
     # Translate to proper column name, e.g. foreign keys.
     db_columns = [peewee_attr_to_col(cls, f) for f in row_fields]
-
     # Store defaults so we can fall back to them if a value
     # isn't set.
     defaults = {}
@@ -2983,7 +2868,7 @@ def bulk_upsert(cls, data, db):
 
     # Assign fields, placeholders and assignments after defaults
     # so our lists/keys stay in order.
-    table = '`'+conn.escape_string(cls._meta.db_table)+'`'
+    table = '`'+conn.escape_string(cls._meta.table_name)+'`'
     escaped_fields = ['`'+conn.escape_string(f)+'`' for f in db_columns]
     placeholders = ['%s' for escaped_field in escaped_fields]
     assignments = ['{x} = VALUES({x})'.format(
@@ -3018,7 +2903,6 @@ def bulk_upsert(cls, data, db):
                 # necessary.
                 batch = []
                 batch_rows = rows[i:min(i + step, num_rows)]
-
                 # We pop them off one by one so we can gradually release
                 # memory as we pass each item. No duplicate memory usage.
                 while len(batch_rows) > 0:
@@ -3051,7 +2935,6 @@ def bulk_upsert(cls, data, db):
                     placeholders=', '.join(placeholders),
                     assignments=', '.join(assignments)
                 )
-
                 cursor.executemany(formatted_query, batch)
 
                 db.execute_sql('SET FOREIGN_KEY_CHECKS=1;')
@@ -3080,8 +2963,8 @@ def create_tables(db):
     tables = [Pokemon, Pokestop, Gym, Raid, ScannedLocation, GymDetails,
               GymMember, GymPokemon, MainWorker, WorkerStatus,
               SpawnPoint, ScanSpawnPoint, SpawnpointDetectionData,
-              Token, LocationAltitude, PlayerLocale, HashKeys]
-    with db.execution_context():
+              LocationAltitude, PlayerLocale]
+    with db.connection_context():
         for table in tables:
             if not table.table_exists():
                 log.info('Creating table: %s', table.__name__)
@@ -3095,9 +2978,8 @@ def drop_tables(db):
     tables = [Pokemon, Pokestop, Gym, Raid, ScannedLocation, Versions,
               GymDetails, GymMember, GymPokemon, MainWorker,
               WorkerStatus, SpawnPoint, ScanSpawnPoint,
-              SpawnpointDetectionData, LocationAltitude, PlayerLocale,
-              Token, HashKeys]
-    with db.execution_context():
+              SpawnpointDetectionData, LocationAltitude, PlayerLocale]
+    with db.connection_context():
         db.execute_sql('SET FOREIGN_KEY_CHECKS=0;')
         for table in tables:
             if table.table_exists():
@@ -3108,7 +2990,7 @@ def drop_tables(db):
 
 
 def verify_table_encoding(db):
-    with db.execution_context():
+    with db.connection_context():
 
         cmd_sql = '''
             SELECT table_name FROM information_schema.tables WHERE
@@ -3146,12 +3028,10 @@ def verify_database_schema(db):
             # Versions table doesn't exist, but there are tables. This must
             # mean the user is coming from a database that existed before we
             # started tracking the schema version. Perform a full upgrade.
-            InsertQuery(Versions, {Versions.key: 'schema_version',
-                                   Versions.val: 0}).execute()
+            Versions.insert({Versions.key: 'schema_version', Versions.val: 0}).execute()
             database_migrate(db, 0)
         else:
-            InsertQuery(Versions, {Versions.key: 'schema_version',
-                                   Versions.val: db_schema_version}).execute()
+            Versions.insert({Versions.key: 'schema_version', Versions.val: db_schema_version}).execute()
 
     else:
         db_ver = Versions.get(Versions.key == 'schema_version').val
