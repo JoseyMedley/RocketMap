@@ -4,7 +4,6 @@
 import os
 import sys
 import logging
-import time
 import re
 import ssl
 import requests
@@ -14,10 +13,10 @@ from distutils.version import StrictVersion
 from threading import Thread, Event
 from queue import Queue
 from flask_cors import CORS
-from flask_cache_bust import init_cache_busting
+from flask_cachebuster import CacheBuster
 
 from pogom.app import Pogom
-from pogom.utils import (get_args, now, gmaps_reverse_geolocate,
+from pogom.utils import (get_args, now,
                          log_resource_usage_loop, get_debug_dump_link,
                          dynamic_loading_refresher, dynamic_rarity_refresher)
 from pogom.altitude import get_gmaps_altitude
@@ -27,9 +26,6 @@ from pogom.models import (init_database, create_tables, drop_tables,
                           verify_table_encoding, verify_database_schema)
 from pogom.webhook import wh_updater
 
-from pogom.osm import update_ex_gyms
-from pogom.proxy import initialize_proxies
-from pogom.search import search_overseer_thread
 from time import strftime
 
 
@@ -61,17 +57,6 @@ stderr_hdlr.setLevel(logging.WARNING)
 log = logging.getLogger()
 log.addHandler(stdout_hdlr)
 log.addHandler(stderr_hdlr)
-
-
-# Assert pgoapi is installed.
-try:
-    import pgoapi
-    from pgoapi import PGoApi, utilities as util
-except ImportError:
-    log.critical(
-        "It seems `pgoapi` is not installed. Try running " +
-        "pip install --upgrade -r requirements.txt.")
-    sys.exit(1)
 
 
 # Patch to make exceptions in threads cause an exception.
@@ -163,52 +148,6 @@ def validate_assets(args):
 
     return True
 
-
-def can_start_scanning(args):
-    # Currently supported pgoapi.
-    pgoapi_version = "1.2.0"
-    api_version_error = (
-        'The installed pgoapi is out of date. Please refer to ' +
-        'http://rocketmap.readthedocs.io/en/develop/common-issues/' +
-        'faq.html#i-get-an-error-about-pgoapi-version'
-    )
-
-    # Assert pgoapi >= pgoapi_version.
-    if (not hasattr(pgoapi, "__version__") or
-            StrictVersion(pgoapi.__version__) < StrictVersion(pgoapi_version)):
-        log.critical(api_version_error)
-        return False
-
-    # Abort if we don't have a hash key set.
-    if not args.hash_key:
-        log.critical('Hash key is required for scanning. Exiting.')
-        return False
-
-    # Check the PoGo api pgoapi implements against what RM is expecting.
-    # Some API versions have a non-standard version int, so we map them
-    # to the correct one.
-    api_version_int = int(args.api_version.replace('.', '0'))
-    api_version_map = {
-        8302: 8300,
-        8501: 8500,
-        8705: 8700,
-        8901: 8900,
-        9101: 9100,
-        9102: 9100
-    }
-    mapped_version_int = api_version_map.get(api_version_int, api_version_int)
-
-    try:
-        if PGoApi.get_api_version() != mapped_version_int:
-            log.critical(api_version_error)
-            return False
-    except AttributeError:
-        log.critical(api_version_error)
-        return False
-
-    return True
-
-
 def startup_db(app, clear_db):
     db = init_database(app)
     if clear_db:
@@ -257,12 +196,6 @@ def main():
 
     set_log_and_verbosity(log)
 
-    # Abort if only-server and no-server are used together.
-    if args.only_server and args.no_server:
-        log.critical(
-            "You can't use no-server and only-server at the same time, silly.")
-        sys.exit(1)
-
     # Abort if status name is not valid.
     regexp = re.compile('^([\w\s\-.]+)$')
     if not regexp.match(args.status_name):
@@ -278,16 +211,8 @@ def main():
         sys.exit(1)
 
     # Let's not forget to run Grunt / Only needed when running with webserver.
-    if not args.no_server and not validate_assets(args):
+    if not validate_assets(args):
         sys.exit(1)
-
-    # Make sure they are warned.
-    if args.no_version_check and not args.only_server:
-        log.warning('You are running RocketMap in No Version Check mode. '
-                    "If you don't know what you're doing, this mode "
-                    'can have negative consequences, and you will not '
-                    'receive support running in NoVC mode. '
-                    'You have been warned.')
 
     position = extract_coordinates(args.location)
 
@@ -311,21 +236,12 @@ def main():
     log.info('Parsed location is: %.4f/%.4f/%.4f (lat/lng/alt).',
              position[0], position[1], position[2])
 
-    # Scanning toggles.
-    log.info('Parsing of Pokemon %s.',
-             'disabled' if args.no_pokemon else 'enabled')
-    log.info('Parsing of Pokestops %s.',
-             'disabled' if args.no_pokestops else 'enabled')
-    log.info('Parsing of Gyms %s.',
-             'disabled' if args.no_gyms else 'enabled')
-    log.info('Pokemon encounters %s.',
-             'enabled' if args.encounter else 'disabled')
-
     app = None
-    if not args.no_server and not args.clear_db:
-        app = Pogom(__name__,
-                    root_path=os.path.dirname(
-                              os.path.abspath(__file__)).decode('utf8'))
+        # DB Updates
+    db_updates_queue = Queue()
+
+    if not args.clear_db:
+        app = Pogom(__name__, db_updates_queue, root_path=os.path.dirname(os.path.abspath(__file__)))
         app.before_request(app.validate_request)
         app.set_current_location(position)
 
@@ -333,36 +249,15 @@ def main():
 
     args.root_path = os.path.dirname(os.path.abspath(__file__))
 
-    if args.ex_gyms:
-        # Geofence is required.
-        if not args.geofence_file:
-            log.critical('A geofence is required to find EX-gyms.')
-            sys.exit(1)
-        update_ex_gyms(args.geofence_file)
-        log.info('Finished checking gyms against OSM parks, exiting.')
-        sys.exit(1)
-
     # Control the search status (running or not) across threads.
     control_flags = {
       'on_demand': Event(),
-      'api_watchdog': Event(),
-      'search_control': Event()
     }
 
     for flag in control_flags.values():
         flag.clear()
 
-    if args.on_demand_timeout > 0:
-        control_flags['on_demand'].set()
-
     heartbeat = [now()]
-
-    # Setup the location tracking queue and push the first location on.
-    new_location_queue = Queue()
-    new_location_queue.put(position)
-
-    # DB Updates
-    db_updates_queue = Queue()
 
     # Thread(s) to process database updates.
     for i in range(args.db_threads):
@@ -400,116 +295,31 @@ def main():
             t.daemon = True
             t.start()
 
-    if not args.only_server:
-        # Speed limit.
-        log.info('Scanning speed limit %s.',
-                 'set to {} km/h'.format(args.kph)
-                 if args.kph > 0 else 'disabled')
-        log.info('High-level speed limit %s.',
-                 'set to {} km/h'.format(args.hlvl_kph)
-                 if args.hlvl_kph > 0 else 'disabled')
+    if args.cors:
+        CORS(app)
 
-        # Check if we are able to scan.
-        if not can_start_scanning(args):
-            sys.exit(1)
+    # No more stale JS.
+    config = { 'extensions': ['.js'], 'hash_size': 5 }
 
-        initialize_proxies(args)
+    cache_buster = CacheBuster(config=config)
+    cache_buster.init_app(app)
 
-        # Monitor files, update data if they've changed recently.
-        # Keys are 'args' object keys, values are filenames to load.
-        files_to_monitor = {}
-
-        if args.encounter:
-            files_to_monitor['enc_whitelist'] = args.enc_whitelist_file
-            log.info('Encounters are enabled.')
-        else:
-            log.info('Encounters are disabled.')
-
-        if args.webhook_blacklist_file:
-            files_to_monitor['webhook_blacklist'] = args.webhook_blacklist_file
-            log.info('Webhook blacklist is enabled.')
-        elif args.webhook_whitelist_file:
-            files_to_monitor['webhook_whitelist'] = args.webhook_whitelist_file
-            log.info('Webhook whitelist is enabled.')
-        else:
-            log.info('Webhook whitelist/blacklist is disabled.')
-
-        if files_to_monitor:
-            t = Thread(target=dynamic_loading_refresher,
-                       name='dynamic-enclist', args=(files_to_monitor,))
-            t.daemon = True
-            t.start()
-            log.info('Dynamic list refresher is enabled.')
-        else:
-            log.info('Dynamic list refresher is disabled.')
-
-        # Update player locale if not set correctly yet.
-        args.player_locale = PlayerLocale.get_locale(args.location)
-        if not args.player_locale:
-            args.player_locale = gmaps_reverse_geolocate(
-                args.gmaps_key,
-                args.locale,
-                str(position[0]) + ', ' + str(position[1]))
-            db_player_locale = {
-                'location': args.location,
-                'country': args.player_locale['country'],
-                'language': args.player_locale['country'],
-                'timezone': args.player_locale['timezone'],
-            }
-            db_updates_queue.put((PlayerLocale, {0: db_player_locale}))
-        else:
-            log.debug(
-                'Existing player locale has been retrieved from the DB.')
-
-        # Gather the Pokemon!
-        argset = (args, new_location_queue, control_flags,
-                  heartbeat, db_updates_queue, wh_updates_queue)
-
-        log.debug('Starting a %s search thread', args.scheduler)
-        search_thread = Thread(target=search_overseer_thread,
-                               name='search-overseer', args=argset)
-        search_thread.daemon = True
-        search_thread.start()
-
-    if args.no_server:
-        # This loop allows for ctrl-c interupts to work since flask won't be
-        # holding the program open.
-        while search_thread.is_alive():
-            time.sleep(60)
+    app.set_control_flags(control_flags)
+    app.set_heartbeat_control(heartbeat)
+    ssl_context = None
+    if (args.ssl_certificate and args.ssl_privatekey and
+            os.path.exists(args.ssl_certificate) and
+            os.path.exists(args.ssl_privatekey)):
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        ssl_context.load_cert_chain(
+            args.ssl_certificate, args.ssl_privatekey)
+        log.info('Web server in SSL mode.')
+    if args.verbose:
+        app.run(threaded=True, use_reloader=False, debug=True,
+                host=args.host, port=args.port, ssl_context=ssl_context)
     else:
-        # Dynamic rarity.
-        if args.rarity_update_frequency:
-            t = Thread(target=dynamic_rarity_refresher,
-                       name='dynamic-rarity')
-            t.daemon = True
-            t.start()
-            log.info('Dynamic rarity is enabled.')
-        else:
-            log.info('Dynamic rarity is disabled.')
-
-        if args.cors:
-            CORS(app)
-
-        # No more stale JS.
-        init_cache_busting(app)
-
-        app.set_control_flags(control_flags)
-        app.set_heartbeat_control(heartbeat)
-        app.set_location_queue(new_location_queue)
-        ssl_context = None
-        if (args.ssl_certificate and args.ssl_privatekey and
-                os.path.exists(args.ssl_certificate) and
-                os.path.exists(args.ssl_privatekey)):
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-            ssl_context.load_cert_chain(
-                args.ssl_certificate, args.ssl_privatekey)
-            log.info('Web server in SSL mode.')
-        if args.verbose:
-            app.run(threaded=True, use_reloader=False, debug=True,
-                    host=args.host, port=args.port, ssl_context=ssl_context)
-        else:
-            app.run(threaded=True, use_reloader=False, debug=False,
-                    host=args.host, port=args.port, ssl_context=ssl_context)
+        app.run(threaded=True, use_reloader=False, debug=False,
+                host=args.host, port=args.port, ssl_context=ssl_context)
 
 
 def set_log_and_verbosity(log):
