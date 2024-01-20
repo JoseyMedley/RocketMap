@@ -130,9 +130,6 @@ def get_args():
                         help=('Locale for Pokemon names (check' +
                               ' static/dist/locales for more).'),
                         default='en')
-    parser.add_argument('-c', '--china',
-                        help='Coordinates transformer for China.',
-                        action='store_true')
     parser.add_argument('-nfl', '--no-fixed-location',
                         help='Disables a fixed map location and shows the ' +
                         'search bar for use in shared maps.',
