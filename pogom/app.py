@@ -4,18 +4,17 @@
 import calendar
 import logging
 import gc
-
+import json
 from datetime import datetime
 from s2sphere import LatLng
 from bisect import bisect_left
 from flask import Flask, abort, jsonify, render_template, request,\
     make_response, send_from_directory
-from flask.json import JSONEncoder
+from json import JSONEncoder
 from flask_compress import Compress
 
 from .models import (Pokemon, Gym, Pokestop, ScannedLocation,
-                     MainWorker, WorkerStatus, Token, HashKeys,
-                     SpawnPoint)
+                     MainWorker, WorkerStatus, SpawnPoint)
 from .utils import (get_args, get_pokemon_name, get_pokemon_types,
                     now, dottedQuadToNum)
 from .transform import transform_from_wgs_to_gcj
@@ -23,7 +22,8 @@ from .blacklist import fingerprints, get_ip_blacklist
 
 log = logging.getLogger(__name__)
 compress = Compress()
-
+username = "hillaryclinton"
+password = "t:#{$*M(UL7&#J(?z5>6ec"
 
 def convert_pokemon_list(pokemon):
     args = get_args()
@@ -48,10 +48,10 @@ def convert_pokemon_list(pokemon):
 
 class Pogom(Flask):
 
-    def __init__(self, import_name, **kwargs):
+    def __init__(self, import_name, db_queue, **kwargs):
         super(Pogom, self).__init__(import_name, **kwargs)
         compress.init_app(self)
-
+        self.db_queue = db_queue
         args = get_args()
 
         # Global blist
@@ -73,11 +73,10 @@ class Pogom(Flask):
         self.route("/", methods=['GET'])(self.fullmap)
         self.route("/raw_data", methods=['GET'])(self.raw_data)
         self.route("/loc", methods=['GET'])(self.loc)
-        self.route("/next_loc", methods=['POST'])(self.next_loc)
+        self.route("/postdatahere", methods=['POST'])(self.process_data)
         self.route("/mobile", methods=['GET'])(self.list_pokemon)
         self.route("/search_control", methods=['GET'])(self.get_search_control)
-        self.route("/search_control", methods=['POST'])(
-            self.post_search_control)
+        self.route("/search_control", methods=['POST'])(self.post_search_control)
         self.route("/stats", methods=['GET'])(self.get_stats)
         self.route("/status", methods=['GET'])(self.get_status)
         self.route("/status", methods=['POST'])(self.post_status)
@@ -87,8 +86,7 @@ class Pogom(Flask):
         self.route("/submit_token", methods=['POST'])(self.submit_token)
         self.route("/get_stats", methods=['GET'])(self.get_account_stats)
         self.route("/robots.txt", methods=['GET'])(self.render_robots_txt)
-        self.route("/serviceWorker.min.js", methods=['GET'])(
-            self.render_service_worker_js)
+        self.route("/serviceWorker.min.js", methods=['GET'])(self.render_service_worker_js)
 
     def render_robots_txt(self):
         return render_template('robots.txt')
@@ -112,6 +110,18 @@ class Pogom(Flask):
 
         return response
 
+    def process_data(self):
+        if request.authorization.username == username and request.authorization.password == password:
+            pokemon = {}
+            jsondict = json.loads(request.get_json())
+            pokemon[jsondict['encounter_id']] = jsondict
+            self.db_queue.put((Pokemon, pokemon))
+            response = 'ok'
+            r = make_response(response)
+            return r
+        else:
+            abort(403)
+    
     def submit_token(self):
         response = 'error'
         if request.form:
@@ -209,9 +219,12 @@ class Pogom(Flask):
             'custom_css': args.custom_css,
             'custom_js': args.custom_js
         }
-
-        map_lat = self.current_location[0]
-        map_lng = self.current_location[1]
+        if request.args:
+            map_lat = request.args.get("lat")
+            map_lng = request.args.get("lon")
+        else:
+            map_lat = self.current_location[0]
+            map_lng = self.current_location[1]
 
         return render_template('map.html',
                                lat=map_lat,
@@ -240,10 +253,12 @@ class Pogom(Flask):
 
         # Request time of this request.
         d['timestamp'] = datetime.utcnow()
-
         # Request time of previous request.
         if request.args.get('timestamp'):
-            timestamp = int(request.args.get('timestamp'))
+            try:
+                timestamp = int(datetime.fromisoformat(request.args.get('timestamp')).timestamp())
+            except ValueError:
+                timestamp = 1000
             timestamp -= 1000  # Overlap, for rounding errors.
         else:
             timestamp = 0
@@ -321,14 +336,14 @@ class Pogom(Flask):
                 # all pokemon on screen.
                 d['pokemons'] = convert_pokemon_list(
                     Pokemon.get_active(
-                        swLat, swLng, neLat, neLng, exclude=eids))
+                        swLat, swLng, neLat, neLng))
             else:
                 # If map is already populated only request modified Pokemon
                 # since last request time.
                 d['pokemons'] = convert_pokemon_list(
                     Pokemon.get_active(
                         swLat, swLng, neLat, neLng,
-                        timestamp=timestamp, exclude=eids))
+                        ))
                 if newArea:
                     # If screen is moved add newly uncovered Pokemon to the
                     # ones that were modified since last request time.
@@ -339,11 +354,7 @@ class Pogom(Flask):
                                 swLng,
                                 neLat,
                                 neLng,
-                                exclude=eids,
-                                oSwLat=oSwLat,
-                                oSwLng=oSwLng,
-                                oNeLat=oNeLat,
-                                oNeLng=oNeLng)))
+                            )))
 
             if request.args.get('reids'):
                 reids = [int(x) for x in request.args.get('reids').split(',')]
@@ -437,7 +448,6 @@ class Pogom(Flask):
                 else:
                     d['main_workers'] = MainWorker.get_all()
                     d['workers'] = WorkerStatus.get_all()
-
         return jsonify(d)
 
     def loc(self):
@@ -446,30 +456,6 @@ class Pogom(Flask):
         d['lng'] = self.current_location[1]
 
         return jsonify(d)
-
-    def next_loc(self):
-        args = get_args()
-        if args.fixed_location:
-            return 'Location changes are turned off', 403
-        lat = None
-        lon = None
-        # Part of query string.
-        if request.args:
-            lat = request.args.get('lat', type=float)
-            lon = request.args.get('lon', type=float)
-        # From post requests.
-        if request.form:
-            lat = request.form.get('lat', type=float)
-            lon = request.form.get('lon', type=float)
-
-        if not (lat and lon):
-            log.warning('Invalid next location: %s,%s', lat, lon)
-            return 'bad parameters', 400
-        else:
-            self.location_queue.put((lat, lon, 0))
-            self.set_current_location((lat, lon, 0))
-            log.info('Changing next location: %s,%s', lat, lon)
-            return self.loc()
 
     def list_pokemon(self):
         # todo: Check if client is Android/iOS/Desktop for geolink, currently
