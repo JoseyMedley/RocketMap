@@ -7,11 +7,15 @@ module.exports = function (grunt) {
 
     var path = require('path')
     var fs = require('fs')
-
+    const sass = require('node-sass');
     grunt.initConfig({
         pkg: grunt.file.readJSON('package.json'),
 
         sass: {
+            options: {
+                implementation: sass,
+                sourceMap: true
+            },
             dist: {
                 files: {
                     'static/dist/css/app.built.css': 'static/sass/main.scss',
@@ -28,7 +32,7 @@ module.exports = function (grunt) {
             options: {
                 sourceMap: true,
                 presets: [
-                    ['env', {
+                    ['@babel/preset-env', {
                         'targets': {
                             'browsers': ['>0.5%']
                         }
