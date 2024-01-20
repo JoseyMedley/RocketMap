@@ -326,280 +326,56 @@ def get_args():
     args.log_filename = args.log_filename.replace('<sn>', '<SN>')
     args.log_filename = args.log_filename.replace('<SN>', args.status_name)
 
-    if args.only_server:
-        if args.location is None:
-            parser.print_usage()
-            print(sys.argv[0] +
-                  ": error: arguments -l/--location is required.")
-            sys.exit(1)
-    else:
-        # If using a CSV file, add the data where needed into the username,
-        # password and auth_service arguments.
-        # CSV file should have lines like "ptc,username,password",
-        # "username,password" or "username".
-        if args.accountcsv is not None:
-            # Giving num_fields something it would usually not get.
-            num_fields = -1
-            with open(args.accountcsv, 'r') as f:
-                for num, line in enumerate(f, 1):
+    errors = []
 
-                    fields = []
-
-                    # First time around populate num_fields with current field
-                    # count.
-                    if num_fields < 0:
-                        num_fields = line.count(',') + 1
-
-                    csv_input = []
-                    csv_input.append('')
-                    csv_input.append('<username>')
-                    csv_input.append('<username>,<password>')
-                    csv_input.append('<ptc/google>,<username>,<password>')
-
-                    # If the number of fields is different,
-                    # then this is not a CSV.
-                    if num_fields != line.count(',') + 1:
-                        print(sys.argv[0] +
-                              ": Error parsing CSV file on line " + str(num) +
-                              ". Your file started with the following " +
-                              "input, '" + csv_input[num_fields] +
-                              "' but now you gave us '" +
-                              csv_input[line.count(',') + 1] + "'.")
-                        sys.exit(1)
-
-                    field_error = ''
-                    line = line.strip()
-
-                    # Ignore blank lines and comment lines.
-                    if len(line) == 0 or line.startswith('#'):
-                        continue
-
-                    # If number of fields is more than 1 split the line into
-                    # fields and strip them.
-                    if num_fields > 1:
-                        fields = line.split(",")
-                        fields = map(str.strip, fields)
-
-                    # If the number of fields is one then assume this is
-                    # "username". As requested.
-                    if num_fields == 1:
-                        # Empty lines are already ignored.
-                        args.username.append(line)
-
-                    # If the number of fields is two then assume this is
-                    # "username,password". As requested.
-                    if num_fields == 2:
-                        # If field length is not longer than 0 something is
-                        # wrong!
-                        if len(fields[0]) > 0:
-                            args.username.append(fields[0])
-                        else:
-                            field_error = 'username'
-
-                        # If field length is not longer than 0 something is
-                        # wrong!
-                        if len(fields[1]) > 0:
-                            args.password.append(fields[1])
-                        else:
-                            field_error = 'password'
-
-                    # If the number of fields is three then assume this is
-                    # "ptc,username,password". As requested.
-                    if num_fields >= 3:
-                        # If field 0 is not ptc or google something is wrong!
-                        if (fields[0].lower() == 'ptc' or
-                                fields[0].lower() == 'google'):
-                            args.auth_service.append(fields[0])
-                        else:
-                            field_error = 'method'
-
-                        # If field length is not longer then 0 something is
-                        # wrong!
-                        if len(fields[1]) > 0:
-                            args.username.append(fields[1])
-                        else:
-                            field_error = 'username'
-
-                        # If field length is not longer then 0 something is
-                        # wrong!
-                        if len(fields[2]) > 0:
-                            args.password.append(fields[2])
-                        else:
-                            field_error = 'password'
-
-                    # If something is wrong display error.
-                    if field_error != '':
-                        type_error = 'empty!'
-                        if field_error == 'method':
-                            type_error = (
-                                'not ptc or google instead we got \'' +
-                                fields[0] + '\'!')
-                        print(sys.argv[0] +
-                              ": Error parsing CSV file on line " + str(num) +
-                              ". We found " + str(num_fields) + " fields, " +
-                              "so your input should have looked like '" +
-                              csv_input[num_fields] + "'\nBut you gave us '" +
-                              line + "', your " + field_error +
-                              " was " + type_error)
-                        sys.exit(1)
-
-        errors = []
-
-        num_auths = len(args.auth_service)
-        num_usernames = 0
-        num_passwords = 0
+    if args.location is None:
+        errors.append(
+            'Missing `location` either as -l/--location or in config.')
 
 
-        
-        num_usernames = len(args.username)
+    if len(errors) > 0:
+        parser.print_usage()
+        print(sys.argv[0] + ": errors: \n - " + "\n - ".join(errors))
+        sys.exit(1)
 
-        if args.location is None:
-            errors.append(
-                'Missing `location` either as -l/--location or in config.')
+    # Prepare the IV/CP scanning filters.
+    args.enc_whitelist = []
 
-        num_passwords = len(args.password)
+    # IV/CP scanning.
+    if args.enc_whitelist_file:
+        with open(args.enc_whitelist_file) as f:
+            args.enc_whitelist = frozenset([int(l.strip()) for l in f])
 
-        if args.step_limit is None:
-            errors.append(
-                'Missing `step_limit` either as -st/--step-limit or ' +
-                'in config.')
 
-        if num_auths == 0:
-            args.auth_service = ['ptc']
-
-        num_auths = len(args.auth_service)
-
-        if num_usernames > 1:
-            if num_passwords > 1 and num_usernames != num_passwords:
-                errors.append((
-                    'The number of provided passwords ({}) must match the ' +
-                    'username count ({})').format(num_passwords,
-                                                  num_usernames))
-            if num_auths > 1 and num_usernames != num_auths:
-                errors.append((
-                    'The number of provided auth ({}) must match the ' +
-                    'username count ({}).').format(num_auths, num_usernames))
-
-        if len(errors) > 0:
-            parser.print_usage()
-            print(sys.argv[0] + ": errors: \n - " + "\n - ".join(errors))
-            sys.exit(1)
-
-        # Fill the pass/auth if set to a single value.
-        if num_passwords == 1:
-            args.password = [args.password[0]] * num_usernames
-        if num_auths == 1:
-            args.auth_service = [args.auth_service[0]] * num_usernames
-
-        # Make the accounts list.
-        args.accounts = []
-        for i, username in enumerate(args.username):
-            args.accounts.append({'username': username,
-                                  'password': args.password[i],
-                                  'auth_service': args.auth_service[i]})
-
-        # Prepare the L30 accounts for the account sets.
-        args.accounts_L30 = []
-
-        if args.high_lvl_accounts:
-            # Context processor.
-            with open(args.high_lvl_accounts, 'r') as accs:
-                for line in accs:
-                    # Make sure it's not an empty line.
-                    if not line.strip():
-                        continue
-
-                    line = line.split(',')
-
-                    # We need "service, username, password".
-                    if len(line) < 3:
-                        raise Exception('L30 account is missing a'
-                                        + ' field. Each line requires: '
-                                        + '"service,user,pass".')
-
-                    # Let's remove trailing whitespace.
-                    service = line[0].strip()
-                    username = line[1].strip()
-                    password = line[2].strip()
-
-                    hlvl_account = {
-                        'auth_service': service,
-                        'username': username,
-                        'password': password,
-                        'captcha': False
-                    }
-
-                    args.accounts_L30.append(hlvl_account)
-
-        # Prepare the IV/CP scanning filters.
-        args.enc_whitelist = []
-
-        # IV/CP scanning.
-        if args.enc_whitelist_file:
-            with open(args.enc_whitelist_file) as f:
-                args.enc_whitelist = frozenset([int(l.strip()) for l in f])
-
-        # Make max workers equal number of accounts if unspecified, and disable
-        # account switching.
-        if args.workers is None:
-            args.workers = len(args.accounts)
-            args.account_search_interval = None
-
-        # Disable search interval if 0 specified.
-        if args.account_search_interval == 0:
-            args.account_search_interval = None
-
-        if args.webhook_whitelist_file:
-            with open(args.webhook_whitelist_file) as f:
-                args.webhook_whitelist = frozenset(
-                    [int(p_id.strip()) for p_id in f])
-        elif args.webhook_blacklist_file:
-            with open(args.webhook_blacklist_file) as f:
-                args.webhook_blacklist = frozenset(
-                    [int(p_id.strip()) for p_id in f])
-        else:
-            args.webhook_blacklist = frozenset(
-                [int(i) for i in args.webhook_blacklist])
+    if args.webhook_whitelist_file:
+        with open(args.webhook_whitelist_file) as f:
             args.webhook_whitelist = frozenset(
-                [int(i) for i in args.webhook_whitelist])
+                [int(p_id.strip()) for p_id in f])
+    elif args.webhook_blacklist_file:
+        with open(args.webhook_blacklist_file) as f:
+            args.webhook_blacklist = frozenset(
+                [int(p_id.strip()) for p_id in f])
+    else:
+        args.webhook_blacklist = frozenset(
+            [int(i) for i in args.webhook_blacklist])
+        args.webhook_whitelist = frozenset(
+            [int(i) for i in args.webhook_whitelist])
 
-        # create an empty set
-        args.ignorelist = []
-        if args.ignorelist_file:
-            with open(args.ignorelist_file) as f:
-                args.ignorelist = frozenset([int(l.strip()) for l in f])
+    # create an empty set
+    args.ignorelist = []
+    if args.ignorelist_file:
+        with open(args.ignorelist_file) as f:
+            args.ignorelist = frozenset([int(l.strip()) for l in f])
 
-        # Decide which scanning mode to use.
-        if args.spawnpoint_scanning:
-            args.scheduler = 'SpawnScan'
-        elif args.skip_empty:
-            args.scheduler = 'HexSearchSpawnpoint'
-        elif args.speed_scan:
-            args.scheduler = 'SpeedScan'
-        else:
-            args.scheduler = 'HexSearch'
 
-        # Disable webhook scheduler updates if webhooks are disabled
-        if args.webhooks is None:
-            args.wh_types = frozenset()
-        else:
-            args.wh_types = frozenset([i for i in args.wh_types])
+    # Disable webhook scheduler updates if webhooks are disabled
+    if args.webhooks is None:
+        args.wh_types = frozenset()
+    else:
+        args.wh_types = frozenset([i for i in args.wh_types])
 
     args.locales_dir = 'static/dist/locales'
     args.data_dir = 'static/dist/data'
-
-    # Set hashing endpoint. 'bossland' doesn't need to be added here, it's
-    # the default in the API.
-    legal_endpoints = {
-        'devkat': 'https://hashing.devkat.org'
-    }
-
-    hash_service = args.hash_service.lower()
-    endpoint = legal_endpoints.get(hash_service, False)
-    if endpoint:
-        log.info('Using hash service: %s.', hash_service)
-        HashServer.endpoint = endpoint
-
     return args
 
 
