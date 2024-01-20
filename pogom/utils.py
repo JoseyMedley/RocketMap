@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 
 def parse_unicode(bytestring):
-    decoded_string = bytestring.decode(sys.getfilesystemencoding())
+    decoded_string = bytestring
     return decoded_string
 
 
@@ -64,46 +64,6 @@ def get_args():
                         is_config_file=True, help='Set configuration file')
     parser.add_argument('-scf', '--shared-config',
                         is_config_file=True, help='Set a shared config')
-    parser.add_argument('-a', '--auth-service', type=str.lower,
-                        action='append', default=[],
-                        help=('Auth Services, either one for all accounts ' +
-                              'or one per account: ptc or google. Defaults ' +
-                              'all to ptc.'))
-    parser.add_argument('-u', '--username', action='append', default=[],
-                        help='Usernames, one per account.')
-    parser.add_argument('-p', '--password', action='append', default=[],
-                        help=('Passwords, either single one for all ' +
-                              'accounts or one per account.'))
-    parser.add_argument('-w', '--workers', type=int,
-                        help=('Number of search worker threads to start. ' +
-                              'Defaults to the number of accounts specified.'))
-    parser.add_argument('-asi', '--account-search-interval', type=int,
-                        default=0,
-                        help=('Seconds for accounts to search before ' +
-                              'switching to a new account. 0 to disable.'))
-    parser.add_argument('-ari', '--account-rest-interval', type=int,
-                        default=7200,
-                        help=('Seconds for accounts to rest when they fail ' +
-                              'or are switched out.'))
-    parser.add_argument('-ac', '--accountcsv',
-                        help=('Load accounts from CSV file containing ' +
-                              '"auth_service,username,password" lines.'))
-    parser.add_argument('-hlvl', '--high-lvl-accounts',
-                        help=('Load high level accounts from CSV file '
-                              + ' containing '
-                              + '"auth_service,username,password"'
-                              + ' lines.'))
-    parser.add_argument('-bh', '--beehive',
-                        help=('Use beehive configuration for multiple ' +
-                              'accounts, one account per hex.  Make sure ' +
-                              'to keep -st under 5, and -w under the total ' +
-                              'amount of accounts available.'),
-                        action='store_true', default=False)
-    parser.add_argument('-wph', '--workers-per-hive',
-                        help=('Only referenced when using --beehive. Sets ' +
-                              'number of workers per hive. Default value ' +
-                              'is 1.'),
-                        type=int, default=1)
     parser.add_argument('-l', '--location', type=parse_unicode,
                         help='Location, can be an address or coordinates.')
     # Default based on the average elevation of cities around the world.
@@ -114,63 +74,9 @@ def get_args():
     parser.add_argument('-altv', '--altitude-variance',
                         help='Variance for --altitude in meters',
                         type=int, default=1)
-    parser.add_argument('-uac', '--use-altitude-cache',
-                        help=('Query the Elevation API for each step,' +
-                              ' rather than only once, and store results in' +
-                              ' the database.'),
-                        action='store_true', default=False)
-    parser.add_argument('-j', '--jitter',
-                        help=('Apply random -5m to +5m jitter to ' +
-                              'location.'),
-                        action='store_true', default=False)
     parser.add_argument('-al', '--access-logs',
                         help=("Write web logs to access.log."),
                         action='store_true', default=False)
-    parser.add_argument('-st', '--step-limit', help='Steps.', type=int,
-                        default=12)
-    parser.add_argument('-gf', '--geofence-file',
-                        help=('Geofence file to define outer borders of the ' +
-                              'scan area.'),
-                        default='')
-    parser.add_argument('-gef', '--geofence-excluded-file',
-                        help=('File to define excluded areas inside scan ' +
-                              'area. Regarded this as inverted geofence. ' +
-                              'Can be combined with geofence-file.'),
-                        default='')
-    parser.add_argument('-sd', '--scan-delay',
-                        help='Time delay between requests in scan threads.',
-                        type=float, default=10)
-    parser.add_argument('--spawn-delay',
-                        help=('Number of seconds after spawn time to wait ' +
-                              'before scanning to be sure the Pokemon ' +
-                              'is there.'),
-                        type=float, default=10)
-    parser.add_argument('-enc', '--encounter',
-                        help='Start an encounter to gather IVs and moves.',
-                        action='store_true', default=False)
-    parser.add_argument('-cs', '--captcha-solving',
-                        help='Enables captcha solving.',
-                        action='store_true', default=False)
-    parser.add_argument('-ck', '--captcha-key',
-                        help='2Captcha API key.')
-    parser.add_argument('-cds', '--captcha-dsk',
-                        help='Pokemon Go captcha data-sitekey.',
-                        default="6LeeTScTAAAAADqvhqVMhPpr_vB9D364Ia-1dSgK")
-    parser.add_argument('-mcd', '--manual-captcha-domain',
-                        help='Domain to where captcha tokens will be sent.',
-                        default="http://127.0.0.1:5000")
-    parser.add_argument('-mcr', '--manual-captcha-refresh',
-                        help='Time available before captcha page refreshes.',
-                        type=int, default=30)
-    parser.add_argument('-mct', '--manual-captcha-timeout',
-                        help='Maximum time captchas will wait for manual ' +
-                        'captcha solving. On timeout, if enabled, 2Captcha ' +
-                        'will be used to solve captcha. Default is 0.',
-                        type=int, default=0)
-    parser.add_argument('-ed', '--encounter-delay',
-                        help=('Time delay between encounter pokemon ' +
-                              'in scan threads.'),
-                        type=float, default=1)
     parser.add_argument('-ignf', '--ignorelist-file',
                         default='', help='File containing a list of ' +
                         'Pokemon IDs to ignore, one line per ID. ' +
@@ -207,29 +113,6 @@ def get_args():
                               default='', help='File containing a list of '
                                                'Pokemon IDs NOT to be sent to'
                                                'webhooks.')
-    parser.add_argument('-ld', '--login-delay',
-                        help='Time delay between each login attempt.',
-                        type=float, default=6)
-    parser.add_argument('-lr', '--login-retries',
-                        help=('Number of times to retry the login before ' +
-                              'refreshing a thread.'),
-                        type=int, default=3)
-    parser.add_argument('-mf', '--max-failures',
-                        help=('Maximum number of failures to parse ' +
-                              'locations before an account will go into a ' +
-                              'sleep for -ari/--account-rest-interval ' +
-                              'seconds.'),
-                        type=int, default=5)
-    parser.add_argument('-me', '--max-empty',
-                        help=('Maximum number of empty scans before an ' +
-                              'account will go into a sleep for ' +
-                              '-ari/--account-rest-interval seconds.' +
-                              'Reasonable to use with proxies.'),
-                        type=int, default=0)
-    parser.add_argument('-bsr', '--bad-scan-retry',
-                        help=('Number of bad scans before giving up on a ' +
-                              'step. Default 2, 0 to disable.'),
-                        type=int, default=2)
     parser.add_argument('-msl', '--min-seconds-left',
                         help=('Time that must be left on a spawn before ' +
                               'considering it too late and skipping it. ' +
@@ -250,23 +133,6 @@ def get_args():
     parser.add_argument('-c', '--china',
                         help='Coordinates transformer for China.',
                         action='store_true')
-    parser.add_argument('-m', '--mock', type=str,
-                        help=('Mock mode - point to a fpgo endpoint instead ' +
-                              'of using the real PogoApi, ec: ' +
-                              'http://127.0.0.1:9090'),
-                        default='')
-    parser.add_argument('-ns', '--no-server',
-                        help=('No-Server Mode. Starts the searcher but not ' +
-                              'the Webserver.'),
-                        action='store_true', default=False)
-    parser.add_argument('-os', '--only-server',
-                        help=('Server-Only Mode. Starts only the Webserver ' +
-                              'without the searcher.'),
-                        action='store_true', default=False)
-    parser.add_argument('-sc', '--search-control',
-                        help='Enables search control.',
-                        action='store_true', dest='search_control',
-                        default=False)
     parser.add_argument('-nfl', '--no-fixed-location',
                         help='Disables a fixed map location and shows the ' +
                         'search bar for use in shared maps.',
@@ -275,11 +141,6 @@ def get_args():
     parser.add_argument('-k', '--gmaps-key',
                         help='Google Maps Javascript API Key.',
                         required=True)
-    parser.add_argument('--skip-empty',
-                        help=('Enables skipping of empty cells in normal ' +
-                              'scans - requires previously populated ' +
-                              'database (not to be used with -ss)'),
-                        action='store_true', default=False)
     parser.add_argument('-C', '--cors', help='Enable CORS on web server.',
                         action='store_true', default=False)
     parser.add_argument('-cd', '--clear-db',
@@ -302,74 +163,10 @@ def get_args():
                         help=('Disables PokeStops from the map (including ' +
                               'parsing them into local db).'),
                         action='store_true', default=False)
-    parser.add_argument('-ss', '--spawnpoint-scanning',
-                        help=('Use spawnpoint scanning (instead of hex ' +
-                              'grid). Scans in a circle based on step_limit ' +
-                              'when on DB.'),
-                        action='store_true', default=False)
-    parser.add_argument('-ssct', '--ss-cluster-time',
-                        help=('Time threshold in seconds for spawn point ' +
-                              'clustering (0 to disable).'),
-                        type=int, default=0)
-    parser.add_argument('-speed', '--speed-scan',
-                        help=('Use speed scanning to identify spawn points ' +
-                              'and then scan closest spawns.'),
-                        action='store_true', default=False)
-    parser.add_argument('-spin', '--pokestop-spinning',
-                        help=('Spin Pokestops with 50%% probability.'),
-                        action='store_true', default=False)
-    parser.add_argument('-ams', '--account-max-spins',
-                        help='Maximum number of Pokestop spins per hour.',
-                        type=int, default=20)
-    parser.add_argument('-kph', '--kph',
-                        help=('Set a maximum speed in km/hour for scanner ' +
-                              'movement. Default: 35, 0 to disable.'),
-                        type=int, default=35)
-    parser.add_argument('-hkph', '--hlvl-kph',
-                        help=('Set a maximum speed in km/hour for scanner ' +
-                              'movement, for high-level (L30) accounts. ' +
-                              'Default: 25, 0 to disable.'),
-                        type=int, default=25)
     parser.add_argument('-ldur', '--lure-duration',
                         help=('Change duration for lures set on pokestops. ' +
                               'This is useful for events that extend lure ' +
                               'duration.'), type=int, default=30)
-    parser.add_argument('-px', '--proxy',
-                        help='Proxy url (e.g. socks5://127.0.0.1:9050)',
-                        action='append')
-    parser.add_argument('-pxsc', '--proxy-skip-check',
-                        help='Disable checking of proxies before start.',
-                        action='store_true', default=False)
-    parser.add_argument('-pxt', '--proxy-test-timeout',
-                        help='Timeout settings for proxy checker in seconds.',
-                        type=int, default=5)
-    parser.add_argument('-pxre', '--proxy-test-retries',
-                        help=('Number of times to retry sending proxy ' +
-                              'test requests on failure.'),
-                        type=int, default=0)
-    parser.add_argument('-pxbf', '--proxy-test-backoff-factor',
-                        help=('Factor (in seconds) by which the delay ' +
-                              'until next retry will increase.'),
-                        type=float, default=0.25)
-    parser.add_argument('-pxc', '--proxy-test-concurrency',
-                        help=('Async requests pool size.'), type=int,
-                        default=0)
-    parser.add_argument('-pxd', '--proxy-display',
-                        help=('Display info on which proxy being used ' +
-                              '(index or full). To be used with -ps.'),
-                        type=str, default='index')
-    parser.add_argument('-pxf', '--proxy-file',
-                        help=('Load proxy list from text file (one proxy ' +
-                              'per line), overrides -px/--proxy.'))
-    parser.add_argument('-pxr', '--proxy-refresh',
-                        help=('Period of proxy file reloading, in seconds. ' +
-                              'Works only with -pxf/--proxy-file. ' +
-                              '(0 to disable).'),
-                        type=int, default=0)
-    parser.add_argument('-pxo', '--proxy-rotation',
-                        help=('Enable proxy rotation with account changing ' +
-                              'for search threads (none/round/random).'),
-                        type=str, default='round')
     group = parser.add_argument_group('Database')
     group.add_argument(
         '--db-name', help='Name of the database to be used.', required=True)
@@ -485,38 +282,9 @@ def get_args():
     parser.add_argument('-sn', '--status-name', default=str(os.getpid()),
                         help=('Enable status page database update using ' +
                               'STATUS_NAME as main worker name.'))
-    parser.add_argument('-hk', '--hash-key', default=None, action='append',
-                        help='Key for hash server.')
-    parser.add_argument('-hs', '--hash-service', default='bossland', type=str,
-                        help=('Hash service name. Supports bossland and'
-                              ' devkat hashing.'),
-                        choices=['bossland', 'devkat'])
-    parser.add_argument('--hash-header-sleep',
-                        help=('Use the BossLand headers to determine how long'
-                              ' a worker should sleep if it exceeds the'
-                              ' hashing quota. Default: False.'),
-                        action='store_true', default=False)
-    parser.add_argument('-novc', '--no-version-check', action='store_true',
-                        help='Disable API version check.',
-                        default=False)
-    parser.add_argument('-vci', '--version-check-interval', type=int,
-                        help='Interval to check API version in seconds ' +
-                        '(Default: in [60, 300]).',
-                        default=random.randint(60, 300))
-    parser.add_argument('-odt', '--on-demand_timeout',
-                        help=('Pause searching while web UI is inactive ' +
-                              'for this timeout (in seconds).'),
-                        type=int, default=0)
     parser.add_argument('--disable-blacklist',
                         help=('Disable the global anti-scraper IP blacklist.'),
                         action='store_true', default=False)
-    parser.add_argument('-tp', '--trusted-proxies', default=[],
-                        action='append',
-                        help=('Enables the use of X-FORWARDED-FOR headers ' +
-                              'to identify the IP of clients connecting ' +
-                              'through these trusted proxies.'))
-    parser.add_argument('--api-version', default='0.91.2',
-                        help=('API version currently in use.'))
     parser.add_argument('--no-file-logs',
                         help=('Disable logging to files. ' +
                               'Does not disable --access-logs.'),
@@ -536,11 +304,6 @@ def get_args():
                               'environment and auto-upload to ' +
                               'hastebin.com.'),
                         action='store_true', default=False)
-    parser.add_argument('-exg', '--ex-gyms',
-                        help=('Fetch OSM parks within geofence and flag ' +
-                              'gyms that are candidates for EX raids. ' +
-                              'Only required once per area.'),
-                        action='store_true', default=False)
     verbose = parser.add_mutually_exclusive_group()
     verbose.add_argument('-v',
                          help=('Show debug messages from RocketMap ' +
@@ -550,17 +313,6 @@ def get_args():
                          help=('Show debug messages from RocketMap ' +
                                'and pgoapi.'),
                          type=int, dest='verbose')
-    rarity = parser.add_argument_group('Dynamic Rarity')
-    rarity.add_argument('-Rh', '--rarity-hours',
-                        help=('Number of hours of Pokemon data to use ' +
-                              'to calculate dynamic rarity. Decimals ' +
-                              'allowed. Default: 48, 0 to use all data.'),
-                        type=float, default=48)
-    rarity.add_argument('-Rf', '--rarity-update-frequency',
-                        help=('How often (in minutes) the dynamic rarity ' +
-                              'should be updated. Decimals allowed. ' +
-                              'Default: 0, 0 to disable.'),
-                        type=float, default=0)
     statusp = parser.add_argument_group('Status Page')
     statusp.add_argument('-SPp', '--status-page-password', default=None,
                          help='Set the status page password.')
@@ -700,23 +452,15 @@ def get_args():
         num_usernames = 0
         num_passwords = 0
 
-        if len(args.username) == 0:
-            errors.append(
-                'Missing `username` either as -u/--username, csv file ' +
-                'using -ac, or in config.')
-        else:
-            num_usernames = len(args.username)
+
+        
+        num_usernames = len(args.username)
 
         if args.location is None:
             errors.append(
                 'Missing `location` either as -l/--location or in config.')
 
-        if len(args.password) == 0:
-            errors.append(
-                'Missing `password` either as -p/--password, csv file, ' +
-                'or in config.')
-        else:
-            num_passwords = len(args.password)
+        num_passwords = len(args.password)
 
         if args.step_limit is None:
             errors.append(
@@ -807,14 +551,6 @@ def get_args():
         # Disable search interval if 0 specified.
         if args.account_search_interval == 0:
             args.account_search_interval = None
-
-        # Make sure we don't have an empty account list after adding command
-        # line and CSV accounts.
-        if len(args.accounts) == 0:
-            print(sys.argv[0] +
-                  ": Error: no accounts specified. Use -a, -u, and -p or " +
-                  "--accountcsv to add accounts.")
-            sys.exit(1)
 
         if args.webhook_whitelist_file:
             with open(args.webhook_whitelist_file) as f:
@@ -985,8 +721,8 @@ def get_pokemon_name(pokemon_id):
 
 def get_pokemon_types(pokemon_id):
     pokemon_types = get_pokemon_data(pokemon_id)['types']
-    return map(lambda x: {"type": i8ln(x['type']), "color": x['color']},
-               pokemon_types)
+    return list(map(lambda x: {"type": i8ln(x['type']), "color": x['color']},
+               pokemon_types))
 
 
 def get_moves_data(move_id):
@@ -1095,48 +831,7 @@ def calc_pokemon_level(cp_multiplier):
 
 
 @memoize
-def gmaps_reverse_geolocate(gmaps_key, locale, location):
-    # Find the reverse geolocation
-    geolocator = GoogleV3(api_key=gmaps_key)
 
-    player_locale = {
-        'country': 'US',
-        'language': locale,
-        'timezone': 'America/Denver'
-    }
-
-    try:
-        reverse = geolocator.reverse(location)
-        address = reverse[-1].raw['address_components']
-        country_code = 'US'
-
-        # Find country component.
-        for component in address:
-            # Look for country.
-            component_is_country = any([t == 'country'
-                                        for t in component.get('types', [])])
-
-            if component_is_country:
-                country_code = component['short_name']
-                break
-
-        try:
-            timezone = geolocator.timezone(location)
-            player_locale.update({
-                'country': country_code,
-                'timezone': str(timezone)
-            })
-        except Exception as e:
-            log.exception('Exception on Google Timezone API. '
-                          + 'Please check that you have Google Timezone API'
-                          + ' enabled for your API key'
-                          + ' (https://developers.google.com/maps/'
-                          + 'documentation/timezone/intro): %s.', e)
-    except Exception as e:
-        log.exception('Exception while obtaining player locale: %s.'
-                      + ' Using default locale.', e)
-
-    return player_locale
 
 
 # Get a future_requests FuturesSession that supports asynchronous workers
@@ -1480,7 +1175,7 @@ def peewee_attr_to_col(cls, field):
 
     # Only try to do it on populated fields.
     if field_column is not None:
-        field_column = field_column.db_column
+        field_column = field_column.column_name
     else:
         field_column = field
 
