@@ -4,7 +4,6 @@
 
 var $selectExclude
 var $selectPokemonNotify
-var $selectRarityNotify
 var $textPerfectionNotify
 var $textLevelNotify
 var $selectStyle
@@ -23,7 +22,6 @@ var $selectLuredPokestopsOnly
 var $selectSearchIconMarker
 var $selectLocationIconMarker
 var $switchGymSidebar
-var $selectExcludeRarity
 
 const language = document.documentElement.lang === '' ? 'en' : document.documentElement.lang
 var idToPokemon = {}
@@ -33,12 +31,9 @@ var languageLookupThreshold = 3
 
 var searchMarkerStyles
 
-var timestamp
+var timestampwtf = "0"
 var excludedPokemon = []
-var excludedPokemonByRarity = []
-var excludedRarity
 var notifiedPokemon = []
-var notifiedRarity = []
 var notifiedMinPerfection = null
 var notifiedMinLevel = null
 
@@ -55,10 +50,10 @@ var searchMarker
 var storeZoom = true
 var moves
 
-var oSwLat
-var oSwLng
-var oNeLat
-var oNeLng
+var oSwLat = ""
+var oSwLng = ""
+var oNeLat = ""
+var oNeLng = ""
 
 var lastpokestops
 var lastgyms
@@ -81,15 +76,6 @@ const genderType = ['♂', '♀', '⚲']
 const forms = ['unset', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '!', '?', '👤', '☀️', '☔️', '⛄️', '👤', '⚔️', '🛡️', '⚡️']
 const pokemonWithImages = [
     2, 3, 5, 6, 8, 9, 11, 28, 31, 34, 38, 59, 62, 65, 68, 71, 73, 76, 80, 82, 87, 89, 91, 94, 103, 105, 110, 112, 121, 123, 124, 125, 126, 129, 131, 134, 135, 136, 137, 139, 142, 143, 144, 145, 146, 150, 153, 156, 159, 160, 184, 221, 243, 244, 245, 248, 249, 250, 302, 303, 306, 320, 333, 344, 359, 361, 382, 383, 384
-]
-
-const excludedRaritiesList = [
-  [],
-  ['common'],
-  ['common', 'uncommon'],
-  ['common', 'uncommon', 'rare'],
-  ['common', 'uncommon', 'rare', 'very rare'],
-  ['common', 'uncommon', 'rare', 'very rare', 'ultra rare']
 ]
 
 const weatherEmojis = [ '', '☀️', '☔️', '⛅', '☁️', '💨', '⛄️', '🌁' ]
@@ -532,26 +518,25 @@ function getDateStr(t) {
     if (t) {
         dateStr = moment(t).fromNow()
     }
+    console.log(dateStr)
     return dateStr
 }
 
 function pokemonLabel(item) {
-    const pokemonRarity = getPokemonRarity(item['pokemon_id'])
 
     var name = item['pokemon_name']
-    var rarityDisplay = pokemonRarity ? '(' + i8ln(pokemonRarity) + ')' : ''
     var types = item['pokemon_types']
     var typesDisplay = ''
     var encounterId = item['encounter_id']
     var id = item['pokemon_id']
     var latitude = item['latitude']
     var longitude = item['longitude']
-    var disappearTime = item['disappear_time']
+    var disappearTime = Date.parse(item['disappear_time'])
     var atk = item['individual_attack']
     var def = item['individual_defense']
     var sta = item['individual_stamina']
-    var pMove1 = (moves[item['move_1']] !== undefined) ? i8ln(moves[item['move_1']]['name']) : 'gen/unknown'
-    var pMove2 = (moves[item['move_2']] !== undefined) ? i8ln(moves[item['move_2']]['name']) : 'gen/unknown'
+    //var pMove1 = (moves[item['move_1']] !== null) ? i8ln(moves[item['move_1']]['name']) : 'gen/unknown'
+    //var pMove2 = (moves[item['move_2']] !== null) ? i8ln(moves[item['move_2']]['name']) : 'gen/unknown'
     var weight = item['weight']
     var height = item['height']
     var gender = item['gender']
@@ -581,7 +566,7 @@ function pokemonLabel(item) {
 
     contentstring += `
     <div class='pokemon name'>
-      ${name} <span class='pokemon name pokedex'><a href='http://pokemon.gameinfo.io/en/pokemon/${id}' target='_blank' title='View in Pokédex'>#${id}</a></span> ${formString} <span class='pokemon gender rarity'>${genderType[gender - 1]} ${rarityDisplay}</span> ${typesDisplay} ${weatherDisplay}
+      ${name} <span class='pokemon name pokedex'><a href='http://pokemon.gameinfo.io/en/pokemon/${id}' target='_blank' title='View in Pokédex'>#${id}</a></span> ${formString} ${typesDisplay} ${weatherDisplay}
     </div>`
 
     if (showStats && cp !== null && cpMultiplier !== null) {
@@ -610,9 +595,9 @@ function pokemonLabel(item) {
               <div class='pokemon'>
                 CP: <span class='pokemon encounter'>${cp}/${iv.toFixed(1)}%</span> (A${atk}/D${def}/S${sta})
               </div>
-              <div class='pokemon'>
+              <!-- <div class='pokemon'>
                 Moveset: <span class='pokemon encounter'>${pMove1}/${pMove2}</span>
-              </div>
+              </div> -->
               <div class='pokemon'>
                 Weight: ${weight.toFixed(2)}kg | Height: ${height.toFixed(2)}m
               </div>
@@ -683,16 +668,16 @@ function gymLabel(gym, includeMembers = true) {
     var raidStr = ''
     if (raid && raid.end > Date.now()) {
         if (raid.pokemon_id !== null) {
-            let pMove1 = (moves[raid['move_1']] !== undefined) ? i8ln(moves[raid['move_1']]['name']) : 'unknown'
-            let pMove2 = (moves[raid['move_2']] !== undefined) ? i8ln(moves[raid['move_2']]['name']) : 'unknown'
+            //let pMove1 = (moves[raid['move_1']] !== undefined) ? i8ln(moves[raid['move_1']]['name']) : 'unknown'
+            //let pMove2 = (moves[raid['move_2']] !== undefined) ? i8ln(moves[raid['move_2']]['name']) : 'unknown'
 
             raidStr += `
-                    <div class='move'>
+                    <!--<div class='move'>
                       <span class='name'>${pMove1}</span><span class='type ${moves[raid['move_1']]['type'].toLowerCase()}'>${i8ln(moves[raid['move_1']]['type'])}</span>
                     </div>
                     <div class='move'>
                       <span class='name'>${pMove2}</span><span class='type ${moves[raid['move_2']]['type'].toLowerCase()}'>${i8ln(moves[raid['move_2']]['type'])}</span>
-                    </div>`
+                    </div> -->`
         }
     }
     const lastScannedStr = getDateStr(gym.last_scanned)
@@ -1031,8 +1016,8 @@ function getNotifyText(item) {
         item['individual_defense'], item['individual_stamina'], pokemonlevel]
     const showStats = Store.get('showPokemonStats')
     var ntitle = repArray(((showStats && iv) ? notifyIvTitle : notifyNoIvTitle), find, replace)
-    var dist = moment(item['disappear_time']).format('HH:mm:ss')
-    var until = getTimeUntil(item['disappear_time'])
+    var dist = moment(Date.parse(item['disappear_time'])).format('HH:mm:ss')
+    var until = getTimeUntil(Date.parse(item['disappear_time']))
     var udist = (until.hour > 0) ? until.hour + ':' : ''
     udist += lpad(until.min, 2, 0) + 'm' + lpad(until.sec, 2, 0) + 's'
     find = ['<dist>', '<udist>']
@@ -1100,8 +1085,7 @@ function isNotifyPerfectionPoke(poke) {
 }
 
 function isNotifyPoke(poke) {
-    const pokemonRarity = getPokemonRarity(poke['pokemon_id'])
-    const isOnNotifyList = notifiedPokemon.indexOf(poke['pokemon_id']) > -1 || notifiedRarity.indexOf(pokemonRarity) > -1
+    const isOnNotifyList = notifiedPokemon.indexOf(poke['pokemon_id']) > -1
     const isNotifyPerfectionPkmn = isNotifyPerfectionPoke(poke)
     const showStats = Store.get('showPokemonStats')
 
@@ -1428,21 +1412,12 @@ function clearStaleMarkers() {
 
     $.each(mapData.pokemons, function (key, pokemon) {
         const pokemonId = pokemon['pokemon_id']
-        const isPokeExpired = pokemon['disappear_time'] < Date.now()
+        const isPokeExpired = Date.parse(pokemon['disappear_time']) < Date.now()
         const isPokeExcluded = excludedPokemon.indexOf(pokemonId) !== -1
         // Limit choice to our options [0, 5].
-        const excludedRarityOption = Math.min(Math.max(Store.get('excludedRarity'), 0), 5)
-        const excludedRarity = excludedRaritiesList[excludedRarityOption]
-        const pokemonRarity = getPokemonRarity(pokemon['pokemon_id']).toLowerCase()
-        const isRarityExcluded = excludedRarity.indexOf(pokemonRarity) !== -1
 
-        if (isPokeExpired || isPokeExcluded || isRarityExcluded) {
+        if (isPokeExpired || isPokeExcluded) {
             const oldMarker = pokemon.marker
-            const isPokeExcludedByRarity = excludedPokemonByRarity.indexOf(pokemonId) !== -1
-
-            if (isRarityExcluded && !isPokeExcludedByRarity) {
-                excludedPokemonByRarity.push(pokemonId)
-            }
 
             if (oldMarker.rangeCircle) {
                 oldMarker.rangeCircle.setMap(null)
@@ -1547,12 +1522,14 @@ function loadRawData() {
     var swLng = swPoint.lng()
     var neLat = nePoint.lat()
     var neLng = nePoint.lng()
-
+    timestampwtf = timestampwtf.replace(",", "")
+    var newdate = new Date(timestampwtf)
+    timestampwtf = newdate.toISOString()
     return $.ajax({
         url: 'raw_data',
         type: 'GET',
         data: {
-            'timestamp': timestamp,
+            'timestamp': timestampwtf,
             'pokemon': loadPokemon,
             'lastpokemon': lastpokemon,
             'pokestops': loadPokestops,
@@ -1636,7 +1613,7 @@ function processPokemonChunked(pokemon, chunkSize) {
         // Early skip if we've already stored this spawn or if it's expiring
         // too soon.
         const encounterId = poke.encounter_id
-        const expiringSoon = (poke.disappear_time < (Date.now() + 3000))
+        const expiringSoon = (Date.parse(poke.disappear_time) < (Date.now() + 3000))
         if (mapData.pokemons.hasOwnProperty(encounterId) || expiringSoon) {
             return
         }
@@ -1680,29 +1657,21 @@ function processPokemonChunked(pokemon, chunkSize) {
 
 function processPokemon(item) {
     const isPokeExcluded = excludedPokemon.indexOf(item['pokemon_id']) !== -1
-    const isPokeAlive = item['disappear_time'] > Date.now()
-    // Limit choice to our options [0, 5].
-    const excludedRarityOption = Math.min(Math.max(Store.get('excludedRarity'), 0), 5)
-    const excludedRarity = excludedRaritiesList[excludedRarityOption]
-    const pokemonRarity = getPokemonRarity(item['pokemon_id'])
-    const isRarityExcluded = excludedRarity.indexOf(pokemonRarity) !== -1
-    const isPokeExcludedByRarity = excludedPokemonByRarity.indexOf(item['pokemon_id']) !== -1
-
+    const isPokeAlive = Date.parse(item['disappear_time']) > Date.now()
     var oldMarker = null
     var newMarker = null
 
     if (!(item['encounter_id'] in mapData.pokemons) &&
-         !isPokeExcluded && !isRarityExcluded && isPokeAlive) {
+         !isPokeExcluded && isPokeAlive) {
         // Add marker to map and item to dict.
         if (!item.hidden) {
             const isBounceDisabled = Store.get('isBounceDisabled')
-            const scaleByRarity = Store.get('scaleByRarity')
             const isNotifyPkmn = isNotifyPoke(item)
 
             if (item.marker) {
-                updatePokemonMarker(item.marker, map, scaleByRarity, isNotifyPkmn)
+                updatePokemonMarker(item.marker, map, false, isNotifyPkmn)
             } else {
-                newMarker = setupPokemonMarker(item, map, isBounceDisabled, scaleByRarity, isNotifyPkmn)
+                newMarker = setupPokemonMarker(item, map, isBounceDisabled, false, isNotifyPkmn)
                 customizePokemonMarker(newMarker, item)
                 item.marker = newMarker
             }
@@ -1711,9 +1680,7 @@ function processPokemon(item) {
         } else {
             oldMarker = item.marker
         }
-    } else if (isRarityExcluded && !isPokeExcludedByRarity) {
-        excludedPokemonByRarity.push(item['pokemon_id'])
-    }
+    } 
 
     return [newMarker, oldMarker]
 }
@@ -1984,7 +1951,7 @@ function updateMap() {
                 return this.indexOf(e) < 0
             }, reincludedPokemon)
         }
-        timestamp = result.timestamp
+        timestampwtf = result.timestamp
         lastUpdateTime = Date.now()
     })
 }
@@ -1994,10 +1961,9 @@ function redrawPokemon(pokemonList) {
         var item = pokemonList[key]
 
         if (!item.hidden) {
-            const scaleByRarity = Store.get('scaleByRarity')
             const isNotifyPkmn = isNotifyPoke(item)
 
-            updatePokemonMarker(item, map, scaleByRarity, isNotifyPkmn)
+            updatePokemonMarker(item, map, false, isNotifyPkmn)
         }
     })
 }
@@ -2484,8 +2450,6 @@ $(function () {
     // populate Navbar Style menu
     $selectStyle = $('#map-style')
 
-    // Load dynamic rarity.
-    updatePokemonRarities()
 
     // Load Stylenames, translate entries, and populate lists
     $.getJSON('static/dist/data/mapstyle.min.json').done(function (data) {
@@ -2687,18 +2651,6 @@ $(function () {
         updateMap()
     })
 
-    $selectExcludeRarity = $('#exclude-rarity')
-
-    $selectExcludeRarity.select2({
-        placeholder: 'None',
-        minimumResultsForSearch: Infinity
-    })
-
-    $selectExcludeRarity.on('change', function () {
-        Store.set('excludedRarity', this.value)
-        updateMap()
-    })
-
     $selectSearchIconMarker = $('#iconmarker-style')
     $selectLocationIconMarker = $('#locationmarker-style')
 
@@ -2765,9 +2717,7 @@ $(function () {
     })
 
     $selectExclude = $('#exclude-pokemon')
-    $selectExcludeRarity = $('#exclude-rarity')
     $selectPokemonNotify = $('#notify-pokemon')
-    $selectRarityNotify = $('#notify-rarity')
     $textPerfectionNotify = $('#notify-perfection')
     $textLevelNotify = $('#notify-level')
     var numberOfPokemon = 493
@@ -2786,7 +2736,6 @@ $(function () {
                 text: i8ln(value['name']) + ' - #' + key
             })
             value['name'] = i8ln(value['name'])
-            value['rarity'] = i8ln(value['rarity'])
             $.each(value['types'], function (key, pokemonType) {
                 _types.push({
                     'type': i8ln(pokemonType['type']),
@@ -2808,11 +2757,6 @@ $(function () {
             data: pokeList,
             templateResult: formatState
         })
-        $selectRarityNotify.select2({
-            placeholder: i8ln('Select Rarity'),
-            data: [i8ln('Common'), i8ln('Uncommon'), i8ln('Rare'), i8ln('Very Rare'), i8ln('Ultra Rare')],
-            templateResult: formatState
-        })
 
         // setup list change behavior now that we have the list to work from
         $selectExclude.on('change', function (e) {
@@ -2825,20 +2769,9 @@ $(function () {
             clearStaleMarkers()
             Store.set('remember_select_exclude', excludedPokemon)
         })
-        $selectExcludeRarity.on('change', function (e) {
-            excludedRarity = $selectExcludeRarity.val()
-            reincludedPokemon = reincludedPokemon.concat(excludedPokemonByRarity)
-            excludedPokemonByRarity = []
-            clearStaleMarkers()
-            Store.set('excludedRarity', excludedRarity)
-        })
         $selectPokemonNotify.on('change', function (e) {
             notifiedPokemon = $selectPokemonNotify.val().map(Number)
             Store.set('remember_select_notify', notifiedPokemon)
-        })
-        $selectRarityNotify.on('change', function (e) {
-            notifiedRarity = $selectRarityNotify.val().map(String)
-            Store.set('remember_select_rarity_notify', notifiedRarity)
         })
         $textPerfectionNotify.on('change', function (e) {
             notifiedMinPerfection = parseInt($textPerfectionNotify.val(), 10)
@@ -2865,9 +2798,7 @@ $(function () {
 
         // recall saved lists
         $selectExclude.val(Store.get('remember_select_exclude')).trigger('change')
-        $selectExcludeRarity.val(Store.get('excludedRarity')).trigger('change')
         $selectPokemonNotify.val(Store.get('remember_select_notify')).trigger('change')
-        $selectRarityNotify.val(Store.get('remember_select_rarity_notify')).trigger('change')
         $textPerfectionNotify.val(Store.get('remember_text_perfection_notify')).trigger('change')
         $textLevelNotify.val(Store.get('remember_text_level_notify')).trigger('change')
 
