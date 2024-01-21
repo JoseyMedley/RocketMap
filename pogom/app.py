@@ -23,7 +23,7 @@ from .blacklist import fingerprints, get_ip_blacklist
 log = logging.getLogger(__name__)
 compress = Compress()
 username = "hillaryclinton"
-password = "t:#{$*M(UL7&#J(?z5>6ec"
+password = "pokemongotothepolls"
 
 def convert_pokemon_list(pokemon):
     args = get_args()
@@ -36,9 +36,6 @@ def convert_pokemon_list(pokemon):
         p['pokemon_name'] = get_pokemon_name(p['pokemon_id'])
         p['pokemon_types'] = get_pokemon_types(p['pokemon_id'])
         p['encounter_id'] = str(p['encounter_id'])
-        if args.china:
-            p['latitude'], p['longitude'] = \
-                transform_from_wgs_to_gcj(p['latitude'], p['longitude'])
         pokemon_result.append(p)
 
     # Re-enable the GC.
@@ -75,8 +72,6 @@ class Pogom(Flask):
         self.route("/loc", methods=['GET'])(self.loc)
         self.route("/postdatahere", methods=['POST'])(self.process_data)
         self.route("/mobile", methods=['GET'])(self.list_pokemon)
-        self.route("/search_control", methods=['GET'])(self.get_search_control)
-        self.route("/search_control", methods=['POST'])(self.post_search_control)
         self.route("/stats", methods=['GET'])(self.get_stats)
         self.route("/status", methods=['GET'])(self.get_status)
         self.route("/status", methods=['POST'])(self.post_status)
@@ -142,10 +137,7 @@ class Pogom(Flask):
     def validate_request(self):
         args = get_args()
 
-        # Get real IP behind trusted reverse proxy.
         ip_addr = request.remote_addr
-        if ip_addr in args.trusted_proxies:
-            ip_addr = request.headers.get('X-Forwarded-For', ip_addr)
 
         # Make sure IP isn't blacklisted.
         if self._ip_is_blacklisted(ip_addr):
@@ -177,34 +169,9 @@ class Pogom(Flask):
     def set_current_location(self, location):
         self.current_location = location
 
-    def get_search_control(self):
-        return jsonify({
-            'status': not self.control_flags['search_control'].is_set()})
-
-    def post_search_control(self):
-        args = get_args()
-        if not args.search_control or args.on_demand_timeout > 0:
-            return 'Search control is disabled', 403
-        action = request.args.get('action', 'none')
-        if action == 'on':
-            self.control_flags['search_control'].clear()
-            log.info('Search thread resumed')
-        elif action == 'off':
-            self.control_flags['search_control'].set()
-            log.info('Search thread paused')
-        else:
-            return jsonify({'message': 'invalid use of api'})
-        return self.get_search_control()
-
     def fullmap(self):
         self.heartbeat[0] = now()
         args = get_args()
-        if args.on_demand_timeout > 0:
-            self.control_flags['on_demand'].clear()
-
-        search_display = (args.search_control and args.on_demand_timeout <= 0)
-        scan_display = False if (args.only_server or args.fixed_location or
-                                 args.spawnpoint_scanning) else True
 
         visibility_flags = {
             'gyms': not args.no_gyms,
@@ -212,9 +179,9 @@ class Pogom(Flask):
             'pokestops': not args.no_pokestops,
             'raids': not args.no_raids,
             'gym_info': args.gym_info,
-            'encounter': args.encounter,
-            'scan_display': scan_display,
-            'search_display': search_display,
+            'encounter': True,
+            'scan_display': True,
+            'search_display': True,
             'fixed_display': not args.fixed_location,
             'custom_css': args.custom_css,
             'custom_js': args.custom_js
@@ -247,8 +214,6 @@ class Pogom(Flask):
 
         self.heartbeat[0] = now()
         args = get_args()
-        if args.on_demand_timeout > 0:
-            self.control_flags['on_demand'].clear()
         d = {}
 
         # Request time of this request.
@@ -317,8 +282,7 @@ class Pogom(Flask):
         d['oNeLat'] = neLat
         d['oNeLng'] = neLng
 
-        if (request.args.get('pokemon', 'true') == 'true' and
-                not args.no_pokemon):
+        if (request.args.get('pokemon', 'true') == 'true' and not args.no_pokemon):
 
             # Exclude ids of Pokemon that are hidden.
             eids = []
