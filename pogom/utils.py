@@ -25,8 +25,6 @@ from pprint import pformat
 from time import strftime
 from timeit import default_timer
 
-from pgoapi.hash_server import HashServer
-
 log = logging.getLogger(__name__)
 
 
