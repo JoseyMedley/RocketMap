@@ -1,4 +1,4 @@
-Yes, this is real. This is a working fork of RocketMap in 2024 on Python 3.11, albeit with a much different method of scanning. Expect lots of bugs. This version gets the pokemon data from RealAndroidBot and PGSharp paid(which is free for rooted devices using the code " GIFT-EXPERIMENT-ROOTONLY"), which I modified to post the data to my rocketmap server. You can get my fork of RAB here https://github.com/JoseyMedley/RealAndroidBot/tree/master.
+Yes, this is real. This is a working fork of RocketMap in 2024 on Python 3.11, albeit with a much different method of scanning. Expect lots of bugs. This version gets the pokemon data from RealAndroidBot and PGSharp paid(which is free for rooted devices using the code " GIFT-EXPERIMENT-ROOTONLY"), which I modified to post the data to my rocketmap server. You can get my fork of RAB here https://github.com/JoseyMedley/RealAndroidBot/tree/master. 
 # RocketMap
 
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg) ![License](https://img.shields.io/github/license/RocketMap/RocketMap.svg) [![Build Status](https://travis-ci.org/RocketMap/RocketMap.svg?branch=develop)](https://travis-ci.org/RocketMap/RocketMap)
@@ -28,6 +28,7 @@ Live visualization of all the Pok√©mon (with option to show gyms, raids and Pok√
 ## Installation
 
 For instructions on how to setup and run the tool, please refer to the project [documentation](https://rocketmap.readthedocs.io).
+Also move cHaversine.cp311-win_amd64.pyd into your python_install/Lib/site-packages/ folder. You can compile it from source with cython but ngl I forgot how.
 
 ## Deployment
 
